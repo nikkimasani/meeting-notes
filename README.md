@@ -15,3 +15,7 @@ npm run dev
 - Cloudflare Pages: connect the repository and use `npm run build`, output `dist`.
 
 Microphone access requires HTTPS. Live transcription depends on browser Speech Recognition support. Chrome and Edge provide the broadest support. Imported recordings can be played back while the transcript is added manually.
+
+## AI meeting intelligence
+
+Production supports secure server-side transcription, structured summaries, action items, decisions, key points, and questions grounded in each transcript.
