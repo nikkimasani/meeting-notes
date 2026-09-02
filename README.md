@@ -1,6 +1,16 @@
 # Meeting Notes PWA
 
-A privacy-first meeting recorder, live transcript, summary, and action-item workspace. Data stays in the current browser using local storage.
+A privacy-focused meeting workspace for recording, speaker-aware transcription, AI summaries, action items, decisions, follow-up emails, searchable organization, and cross-device sync.
+
+## Features
+
+- Mobile-safe recording with consent, pause, wake lock, and upload safeguards
+- Speaker diarization with timestamped segments and editable speaker names
+- AI summaries, decisions, risks, open questions, action items, and follow-up agendas
+- Editable action owners, due dates, priorities, and completion tracking
+- Meeting types, attendees, agendas, folders, tags, favorites, archive, and analytics
+- Search, sharing, follow-up email drafting, calendar export, Markdown, JSON, CSV, text, and print-to-PDF
+- Optional Supabase account sync and installable PWA behavior
 
 ## Run
 
@@ -11,11 +21,7 @@ npm run dev
 
 ## Deploy
 
-- Vercel: import the repository and use `npm run build`, output `dist`.
-- Cloudflare Pages: connect the repository and use `npm run build`, output `dist`.
+- Vercel: import the repository, run `npm run build`, and publish `dist`.
+- Set `OPENAI_API_KEY` in Vercel for transcription and AI features.
 
-Microphone access requires HTTPS. Live transcription depends on browser Speech Recognition support. Chrome and Edge provide the broadest support. Imported recordings can be played back while the transcript is added manually.
-
-## AI meeting intelligence
-
-Production supports secure server-side transcription, structured summaries, action items, decisions, key points, and questions grounded in each transcript.
+Microphone access requires HTTPS.

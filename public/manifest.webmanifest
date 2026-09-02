@@ -1,1 +1,50 @@
-{"name":"Meeting Notes","short_name":"Meetings","description":"Record, transcribe, and summarize meetings.","start_url":"/","display":"standalone","background_color":"#081421","theme_color":"#0c1b2a","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}
+{
+  "name": "Meeting Notes",
+  "short_name": "Meetings",
+  "description": "Record, transcribe, summarize, organize, and share meetings.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#081421",
+  "theme_color": "#0c1b2a",
+  "categories": [
+    "productivity",
+    "business",
+    "utilities"
+  ],
+  "shortcuts": [
+    {
+      "name": "New meeting",
+      "short_name": "New",
+      "url": "/?action=new",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Search meetings",
+      "short_name": "Search",
+      "url": "/?focus=search",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
