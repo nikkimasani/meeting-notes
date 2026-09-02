@@ -5,7 +5,7 @@ export default async function handler(request) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return json({ error: 'AI service is not configured.' }, 503);
   try {
-    const { transcript, title = 'Meeting' } = await request.json();
+    const { transcript, title = 'Meeting', meetingType = 'general' } = await request.json();
     if (!transcript?.trim()) return json({ error: 'A transcript is required.' }, 400);
     if (transcript.length > 180000) return json({ error: 'Transcript is too long.' }, 413);
     const schema = {
@@ -18,16 +18,18 @@ export default async function handler(request) {
           task: { type: 'string' }, owner: { type: ['string','null'] }, due: { type: ['string','null'] }, priority: { type: 'string', enum: ['low','medium','high'] }
         }, required: ['task','owner','due','priority'] } },
         topics: { type: 'array', items: { type: 'string' } },
-        follow_up: { type: 'array', items: { type: 'string' } }
-      }, required: ['summary','key_points','decisions','action_items','topics','follow_up']
+        follow_up: { type: 'array', items: { type: 'string' } },
+        open_questions: { type: 'array', items: { type: 'string' } },
+        risks: { type: 'array', items: { type: 'string' } }
+      }, required: ['summary','key_points','decisions','action_items','topics','follow_up','open_questions','risks']
     };
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         model: 'gpt-4.1-mini',
-        instructions: 'You turn meeting transcripts into concise, accurate notes. Never invent facts, owners, dates, decisions, or tasks. Keep the summary distinct from the transcript. Extract action items only when the transcript supports them. Use null when owner or due date is unstated.',
-        input: `Meeting title: ${title}\n\nTranscript:\n${transcript}`,
+        instructions: 'You turn meeting transcripts into concise, accurate notes. Never invent facts, owners, dates, decisions, or tasks. Keep the summary distinct from the transcript. Extract action items, decisions, open questions, risks, and follow-up agenda items only when the transcript supports them. Use null when owner or due date is unstated. Adapt emphasis to the meeting type while remaining factual.',
+        input: `Meeting title: ${title}\nMeeting type: ${meetingType}\n\nTranscript:\n${transcript}`,
         text: { format: { type: 'json_schema', name: 'meeting_analysis', strict: true, schema } }
       })
     });
