@@ -1,6 +1,6 @@
 {
-  "name": "SaidDone",
-  "short_name": "SaidDone",
+  "name": "Said and Done",
+  "short_name": "Said and Done",
   "description": "Turn meetings into transcripts, summaries, decisions, and action items.",
   "start_url": "/",
   "scope": "/",
