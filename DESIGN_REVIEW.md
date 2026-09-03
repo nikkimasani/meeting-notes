@@ -36,3 +36,13 @@
 - Keyboard: Escape closes Settings and focus returns to the opener.
 - Controls: minimum 44 pixel targets and visible focus rings.
 - Themes: semantic colors support System, Light, and Dark modes.
+
+## Conversation-first mobile revision
+
+- Replaced the editor-first mobile landing page with a conversation library.
+- Added top-level Conversations, Calendar, and Action Items views.
+- Grouped conversations by date and reduced each meeting to a readable preview card.
+- Added a prominent center microphone action for immediate recording.
+- Moved meeting fields and analysis tools into a secondary detail screen.
+- Added a focused recording screen that hides unrelated meeting controls.
+- Updated the mobile color system to a calm slate surface with a clear blue action color.
