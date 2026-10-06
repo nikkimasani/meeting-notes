@@ -62,9 +62,10 @@ export async function beginRecording(id: string, mimeType: string): Promise<void
 }
 
 export async function appendRecordingChunk(recordingId: string, sequence: number, blob: Blob): Promise<void> {
+  const data = await blob.arrayBuffer();
   const database = await openDatabase();
   const transaction = database.transaction(CHUNK_STORE, 'readwrite');
-  transaction.objectStore(CHUNK_STORE).put({ recordingId, sequence, blob });
+  transaction.objectStore(CHUNK_STORE).put({ recordingId, sequence, data, type: blob.type });
   await transactionComplete(transaction);
   database.close();
 }
@@ -82,9 +83,9 @@ export async function completeRecording(id: string, duration: number): Promise<v
 async function readBlob(database: IDBDatabase, session: RecordingSession): Promise<Blob> {
   const transaction = database.transaction(CHUNK_STORE, 'readonly');
   const index = transaction.objectStore(CHUNK_STORE).index('by-recording');
-  const rows = await request<Array<{ recordingId: string; sequence: number; blob: Blob }>>(index.getAll(session.id));
+  const rows = await request<Array<{ recordingId: string; sequence: number; data?: ArrayBuffer; blob?: Blob; type?: string }>>(index.getAll(session.id));
   rows.sort((a, b) => a.sequence - b.sequence);
-  return new Blob(rows.map(row => row.blob), { type: session.mimeType || rows[0]?.blob.type || 'audio/webm' });
+  return new Blob(rows.map(row => row.data || row.blob).filter((part): part is ArrayBuffer | Blob => !!part), { type: session.mimeType || rows[0]?.type || rows[0]?.blob?.type || 'audio/webm' });
 }
 
 export async function getRecording(id: string): Promise<StoredRecording | null> {
