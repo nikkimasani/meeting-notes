@@ -7,42 +7,22 @@ export async function POST(request) {
     if (!(audio instanceof File) || !audio.size) return json({ error: 'No audio was received.' }, 400);
     if (audio.size > 24 * 1024 * 1024) return json({ error: 'Recording is larger than 24 MB. Import a shorter recording.' }, 413);
     const language = incoming.get('language');
-    let response;
-    let data;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const form = new FormData();
-      form.append('file', audio, audio.name || 'meeting.webm');
-      form.append('model', 'gpt-4o-transcribe-diarize');
-      form.append('response_format', 'diarized_json');
-      form.append('chunking_strategy', 'auto');
-      if (language && language !== 'auto') form.append('language', language);
-      try {
-        response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-          method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form
-        });
-      } catch {
-        if (attempt < 2) {
-          await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-          continue;
-        }
-        return json({ error: 'The transcription service is temporarily unavailable. Your recording is safe; please try again shortly.' }, 502);
+    let result;
+    const models = [
+      { name: 'gpt-4o-transcribe-diarize', format: 'diarized_json', chunking: true },
+      { name: 'gpt-transcribe', format: 'json', chunking: false }
+    ];
+    for (const model of models) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        result = await transcribe(audio, language, key, model);
+        if (result.ok) break;
+        if (!result.temporary) return json({ error: result.data?.error?.message || 'Transcription failed.' }, result.status);
+        if (attempt < 1) await new Promise(resolve => setTimeout(resolve, 500));
       }
-      const raw = await response.text();
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        data = null;
-      }
-      const temporary = response.status === 429 || response.status >= 500 || data === null;
-      if (response.ok && data) break;
-      if (temporary && attempt < 2) {
-        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-        continue;
-      }
-      if (!data) return json({ error: 'The transcription service is temporarily unavailable. Your recording is safe; please try again shortly.' }, 502);
-      return json({ error: data.error?.message || 'Transcription failed.' }, response.status);
+      if (result?.ok) break;
     }
-    if (!response?.ok || !data) return json({ error: 'The transcription service is temporarily unavailable. Your recording is safe; please try again shortly.' }, 502);
+    if (!result?.ok || !result.data) return json({ error: 'The transcription service is temporarily unavailable. Your recording is safe; please try again shortly.' }, 502);
+    const data = result.data;
     const segments = Array.isArray(data.segments) ? data.segments.filter(segment => segment && segment.text).map(segment => ({
       speaker: String(segment.speaker || 'Speaker'),
       text: String(segment.text).trim(),
@@ -56,6 +36,30 @@ export async function POST(request) {
     return json({ transcript, segments, duration: Number(data.duration) || 0 });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Transcription failed.' }, 500);
+  }
+}
+async function transcribe(audio, language, key, model) {
+  const form = new FormData();
+  form.append('file', audio, audio.name || 'meeting.webm');
+  form.append('model', model.name);
+  form.append('response_format', model.format);
+  if (model.chunking) form.append('chunking_strategy', 'auto');
+  if (language && language !== 'auto') form.append('language', language);
+  try {
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form
+    });
+    const raw = await response.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { data = null; }
+    return {
+      ok: response.ok && data !== null,
+      temporary: response.status === 429 || response.status >= 500 || data === null,
+      status: response.status,
+      data
+    };
+  } catch {
+    return { ok: false, temporary: true, status: 502, data: null };
   }
 }
 function json(body, status = 200) {
