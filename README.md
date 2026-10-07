@@ -11,6 +11,7 @@ A privacy-focused meeting workspace for recording, speaker-aware transcription, 
 - Meeting types, attendees, agendas, folders, tags, favorites, archive, and analytics
 - Search, sharing, follow-up email drafting, calendar export, Markdown, JSON, CSV, text, and print-to-PDF
 - Optional Supabase account sync and installable PWA behavior
+- Durable background transcription with per-chunk checkpoints, retries, progress, and monthly cost estimates
 
 ## Run
 
@@ -23,5 +24,6 @@ npm run dev
 
 - Vercel: import the repository, run `npm run build`, and publish `dist`.
 - Set `OPENAI_API_KEY` in Vercel for transcription and AI features.
+- For background transcription, follow [docs/BACKGROUND_TRANSCRIPTION.md](docs/BACKGROUND_TRANSCRIPTION.md). The direct transcription endpoint remains available as a fallback.
 
 Microphone access requires HTTPS.

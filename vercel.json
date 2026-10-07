@@ -3,6 +3,10 @@
   "functions": {
     "api/transcribe.js": {
       "maxDuration": 300
+    },
+    "api/transcription-jobs/process.js": {
+      "maxDuration": 300
     }
-  }
+  },
+  "crons": [{ "path": "/api/transcription-jobs/process", "schedule": "*/5 * * * *" }]
 }
