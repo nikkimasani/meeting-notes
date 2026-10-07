@@ -1,5 +1,4 @@
-export default async function handler(request) {
-  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+export async function POST(request) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return json({ error: 'AI service is not configured.' }, 503);
   try {
