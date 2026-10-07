@@ -1,5 +1,3 @@
-export const config = { runtime: 'edge' };
-
 export default async function handler(request) {
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const key = process.env.OPENAI_API_KEY;
