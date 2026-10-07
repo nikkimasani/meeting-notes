@@ -52,6 +52,13 @@ async function transcribe(audio, language, key, model) {
     const raw = await response.text();
     let data;
     try { data = JSON.parse(raw); } catch { data = null; }
+    if (!response.ok || data === null) console.warn(JSON.stringify({
+      event: 'transcription_attempt_failed',
+      model: model.name,
+      status: response.status,
+      contentType: response.headers.get('content-type') || '',
+      upstreamRequestId: response.headers.get('x-request-id') || ''
+    }));
     return {
       ok: response.ok && data !== null,
       temporary: response.status === 429 || response.status >= 500 || data === null,
