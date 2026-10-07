@@ -38,6 +38,9 @@ export async function POST(request) {
     return json({ error: error instanceof Error ? error.message : 'Transcription failed.' }, 500);
   }
 }
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: corsHeaders() });
+}
 async function transcribe(audio, language, key, model) {
   const form = new FormData();
   form.append('file', audio, audio.name || 'meeting.webm');
@@ -70,5 +73,12 @@ async function transcribe(audio, language, key, model) {
   }
 }
 function json(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders(), 'content-type': 'application/json', 'cache-control': 'no-store' } });
+}
+function corsHeaders() {
+  return {
+    'access-control-allow-origin': 'https://meeting-notes-cloudflare.pages.dev',
+    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-headers': 'content-type'
+  };
 }
