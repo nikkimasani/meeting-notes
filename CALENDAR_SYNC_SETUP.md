@@ -24,4 +24,4 @@ Set these as sensitive environment variables on the `meeting-notes` Vercel proje
 
 The server-side `CALENDAR_STATE_SECRET` and `CALENDAR_TOKEN_ENCRYPTION_KEY` are generated and stored as sensitive Vercel settings. Do not expose them in the browser bundle or commit them to the repository.
 
-Redeploy the Vercel project after setting provider credentials. The user can then sign in to Said and Done, open Settings → Calendar connections, connect each provider, and select “Sync both calendars.” Subsequent syncs compare edits on each side and apply the newer change to the linked event and meeting.
+Redeploy the Vercel project after setting provider credentials. The user can then sign in to Said and Done, open Settings → Calendar connections, connect each provider, and select “Sync both calendars.” After connecting, Said and Done syncs when the app opens or returns to the foreground and every five minutes while it stays open. Each sync compares edits on both sides and applies the newer change to the linked event and meeting.
