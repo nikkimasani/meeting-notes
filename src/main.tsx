@@ -74,6 +74,8 @@ async function createTranscriptionParts(blob:Blob):Promise<Blob[]>{
    for(let i=0;i<frameCount;i++){const sourceIndex=Math.min(sourceEnd-1,sourceStart+Math.floor(i*decoded.sampleRate/targetRate));let sample=0;for(let channel=0;channel<decoded.numberOfChannels;channel++)sample+=decoded.getChannelData(channel)[sourceIndex];sample=Math.max(-1,Math.min(1,sample/decoded.numberOfChannels));pcm[i]=sample<0?sample*32768:sample*32767}
    const header=new ArrayBuffer(44),view=new DataView(header),write=(offset:number,value:string)=>{for(let i=0;i<value.length;i++)view.setUint8(offset+i,value.charCodeAt(i))};write(0,'RIFF');view.setUint32(4,36+pcm.byteLength,true);write(8,'WAVE');write(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,targetRate,true);view.setUint32(28,targetRate*2,true);view.setUint16(32,2,true);view.setUint16(34,16,true);write(36,'data');view.setUint32(40,pcm.byteLength,true);parts.push(new Blob([header,pcm.buffer],{type:'audio/wav'}));
   }
+  return parts.length?parts:[blob];
+ }finally{void context.close()}
 }
 const SB_URL = "https://bazjlrualnmbanmhiuau.supabase.co";
 const SB_KEY = "sb_publishable_ez3TVctnbFIUHqr_dMOUeQ_5WpsYEHs";
