@@ -1,111 +1,16 @@
-const DB_NAME = 'said-and-done-recordings';
-const DB_VERSION = 1;
-const SESSION_STORE = 'sessions';
-const CHUNK_STORE = 'chunks';
-
-export type StoredRecording = {
-  id: string;
-  mimeType: string;
-  startedAt: string;
-  duration: number;
-  status: 'recording' | 'complete';
-  blob: Blob;
-};
-
-type RecordingSession = Omit<StoredRecording, 'blob'>;
-
-function request<T>(value: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    value.onsuccess = () => resolve(value.result);
-    value.onerror = () => reject(value.error || new Error('Recording storage failed.'));
-  });
-}
-
-function transactionComplete(transaction: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error || new Error('Recording storage failed.'));
-    transaction.onabort = () => reject(transaction.error || new Error('Recording storage was interrupted.'));
-  });
-}
-
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const opening = indexedDB.open(DB_NAME, DB_VERSION);
-    opening.onupgradeneeded = () => {
-      const database = opening.result;
-      if (!database.objectStoreNames.contains(SESSION_STORE)) {
-        database.createObjectStore(SESSION_STORE, { keyPath: 'id' });
-      }
-      if (!database.objectStoreNames.contains(CHUNK_STORE)) {
-        const chunks = database.createObjectStore(CHUNK_STORE, { keyPath: ['recordingId', 'sequence'] });
-        chunks.createIndex('by-recording', 'recordingId');
-      }
-    };
-    opening.onsuccess = () => resolve(opening.result);
-    opening.onerror = () => reject(opening.error || new Error('Unable to open recording storage.'));
-  });
-}
-
-export async function beginRecording(id: string, mimeType: string): Promise<void> {
-  const database = await openDatabase();
-  const transaction = database.transaction(SESSION_STORE, 'readwrite');
-  transaction.objectStore(SESSION_STORE).put({
-    id,
-    mimeType,
-    startedAt: new Date().toISOString(),
-    duration: 0,
-    status: 'recording',
-  } satisfies RecordingSession);
-  await transactionComplete(transaction);
-  database.close();
-}
-
-export async function appendRecordingChunk(recordingId: string, sequence: number, blob: Blob): Promise<void> {
-  const data = await blob.arrayBuffer();
-  const database = await openDatabase();
-  const transaction = database.transaction(CHUNK_STORE, 'readwrite');
-  transaction.objectStore(CHUNK_STORE).put({ recordingId, sequence, data, type: blob.type });
-  await transactionComplete(transaction);
-  database.close();
-}
-
-export async function completeRecording(id: string, duration: number): Promise<void> {
-  const database = await openDatabase();
-  const transaction = database.transaction(SESSION_STORE, 'readwrite');
-  const store = transaction.objectStore(SESSION_STORE);
-  const session = await request<RecordingSession | undefined>(store.get(id));
-  if (session) store.put({ ...session, duration, status: 'complete' } satisfies RecordingSession);
-  await transactionComplete(transaction);
-  database.close();
-}
-
-async function readBlob(database: IDBDatabase, session: RecordingSession): Promise<Blob> {
-  const transaction = database.transaction(CHUNK_STORE, 'readonly');
-  const index = transaction.objectStore(CHUNK_STORE).index('by-recording');
-  const rows = await request<Array<{ recordingId: string; sequence: number; data?: ArrayBuffer; blob?: Blob; type?: string }>>(index.getAll(session.id));
-  rows.sort((a, b) => a.sequence - b.sequence);
-  return new Blob(rows.map(row => row.data || row.blob).filter((part): part is ArrayBuffer | Blob => !!part), { type: session.mimeType || rows[0]?.type || rows[0]?.blob?.type || 'audio/webm' });
-}
-
-export async function getRecording(id: string): Promise<StoredRecording | null> {
-  const database = await openDatabase();
-  const transaction = database.transaction(SESSION_STORE, 'readonly');
-  const session = await request<RecordingSession | undefined>(transaction.objectStore(SESSION_STORE).get(id));
-  if (!session) {
-    database.close();
-    return null;
-  }
-  const blob = await readBlob(database, session);
-  database.close();
-  return { ...session, blob };
-}
-
-export async function listRecordings(): Promise<StoredRecording[]> {
-  const database = await openDatabase();
-  const transaction = database.transaction(SESSION_STORE, 'readonly');
-  const sessions = await request<RecordingSession[]>(transaction.objectStore(SESSION_STORE).getAll());
-  const recordings = await Promise.all(sessions.map(async session => ({ ...session, blob: await readBlob(database, session) })));
-  database.close();
-  return recordings.filter(recording => recording.blob.size > 0);
-}
+const DB_NAME='said-and-done-recordings',DB_VERSION=2,SESSION_STORE='sessions',CHUNK_STORE='chunks';
+export type RecordingBackupStatus='local'|'uploading'|'cloud'|'failed';
+export type StoredRecording={id:string;mimeType:string;startedAt:string;updatedAt:string;duration:number;chunkCount:number;byteLength:number;status:'recording'|'complete';backupStatus:RecordingBackupStatus;remotePath?:string;blob:Blob};
+type RecordingSession=Omit<StoredRecording,'blob'>;
+const request=<T>(value:IDBRequest<T>)=>new Promise<T>((resolve,reject)=>{value.onsuccess=()=>resolve(value.result);value.onerror=()=>reject(value.error||new Error('Recording storage failed.'))});
+const transactionComplete=(transaction:IDBTransaction)=>new Promise<void>((resolve,reject)=>{transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(transaction.error||new Error('Recording storage failed.'));transaction.onabort=()=>reject(transaction.error||new Error('Recording storage was interrupted.'))});
+const openDatabase=()=>new Promise<IDBDatabase>((resolve,reject)=>{const opening=indexedDB.open(DB_NAME,DB_VERSION);opening.onupgradeneeded=()=>{const database=opening.result;if(!database.objectStoreNames.contains(SESSION_STORE))database.createObjectStore(SESSION_STORE,{keyPath:'id'});if(!database.objectStoreNames.contains(CHUNK_STORE)){const chunks=database.createObjectStore(CHUNK_STORE,{keyPath:['recordingId','sequence']});chunks.createIndex('by-recording','recordingId')}};opening.onsuccess=()=>resolve(opening.result);opening.onerror=()=>reject(opening.error||new Error('Unable to open recording storage.'))});
+function normalizeSession(session:any):RecordingSession{return{...session,updatedAt:session.updatedAt||session.startedAt,chunkCount:session.chunkCount||0,byteLength:session.byteLength||0,backupStatus:session.backupStatus||'local'}}
+export async function beginRecording(id:string,mimeType:string){const database=await openDatabase(),transaction=database.transaction(SESSION_STORE,'readwrite'),now=new Date().toISOString();transaction.objectStore(SESSION_STORE).put({id,mimeType,startedAt:now,updatedAt:now,duration:0,chunkCount:0,byteLength:0,status:'recording',backupStatus:'local'} satisfies RecordingSession);await transactionComplete(transaction);database.close()}
+/** Saves an audio chunk and its recovery manifest checkpoint atomically. */
+export async function appendRecordingChunk(recordingId:string,sequence:number,blob:Blob,duration:number){const data=await blob.arrayBuffer(),database=await openDatabase(),transaction=database.transaction([CHUNK_STORE,SESSION_STORE],'readwrite');transaction.objectStore(CHUNK_STORE).put({recordingId,sequence,data,type:blob.type});const sessions=transaction.objectStore(SESSION_STORE),existing=await request<RecordingSession|undefined>(sessions.get(recordingId));if(existing){const session=normalizeSession(existing);sessions.put({...session,mimeType:session.mimeType||blob.type,duration:Math.max(session.duration,duration),updatedAt:new Date().toISOString(),chunkCount:Math.max(session.chunkCount,sequence+1),byteLength:session.byteLength+data.byteLength})}await transactionComplete(transaction);database.close()}
+export async function completeRecording(id:string,duration:number){const database=await openDatabase(),transaction=database.transaction(SESSION_STORE,'readwrite'),store=transaction.objectStore(SESSION_STORE),existing=await request<RecordingSession|undefined>(store.get(id));if(existing)store.put({...normalizeSession(existing),duration:Math.max(existing.duration,duration),updatedAt:new Date().toISOString(),status:'complete'});await transactionComplete(transaction);database.close()}
+export async function setRecordingBackupStatus(id:string,backupStatus:RecordingBackupStatus,remotePath?:string){const database=await openDatabase(),transaction=database.transaction(SESSION_STORE,'readwrite'),store=transaction.objectStore(SESSION_STORE),existing=await request<RecordingSession|undefined>(store.get(id));if(existing)store.put({...normalizeSession(existing),backupStatus,remotePath:remotePath||existing.remotePath,updatedAt:new Date().toISOString()});await transactionComplete(transaction);database.close()}
+async function readBlob(database:IDBDatabase,session:RecordingSession){const transaction=database.transaction(CHUNK_STORE,'readonly'),index=transaction.objectStore(CHUNK_STORE).index('by-recording'),rows=await request<Array<{sequence:number;data?:ArrayBuffer;blob?:Blob;type?:string}>>(index.getAll(session.id));rows.sort((a,b)=>a.sequence-b.sequence);return new Blob(rows.map(row=>row.data||row.blob).filter((part):part is ArrayBuffer|Blob=>!!part),{type:session.mimeType||rows[0]?.type||rows[0]?.blob?.type||'audio/webm'})}
+export async function getRecording(id:string):Promise<StoredRecording|null>{const database=await openDatabase(),transaction=database.transaction(SESSION_STORE,'readonly'),raw=await request<RecordingSession|undefined>(transaction.objectStore(SESSION_STORE).get(id));if(!raw){database.close();return null}const session=normalizeSession(raw),blob=await readBlob(database,session);database.close();return{...session,blob}}
+export async function listRecordings():Promise<StoredRecording[]>{const database=await openDatabase(),transaction=database.transaction(SESSION_STORE,'readonly'),sessions=(await request<RecordingSession[]>(transaction.objectStore(SESSION_STORE).getAll())).map(normalizeSession),recordings=await Promise.all(sessions.map(async session=>({...session,blob:await readBlob(database,session)})));database.close();return recordings.filter(recording=>recording.blob.size>0).sort((a,b)=>+new Date(b.startedAt)-+new Date(a.startedAt))}
