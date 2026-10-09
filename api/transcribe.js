@@ -10,6 +10,7 @@ export async function POST(request) {
     if (!(audio instanceof File) || !audio.size) return respond({ error: 'No audio was received.' }, 400);
     if (audio.size > 24 * 1024 * 1024) return respond({ error: 'Recording is larger than 24 MB. Import a shorter recording.' }, 413);
     const language = incoming.get('language');
+    const prompt = String(incoming.get('prompt') || '').slice(0, 1000);
     console.info(JSON.stringify({ event: 'transcription_started', requestId, bytes: audio.size, type: audio.type }));
     let result;
     const models = [
@@ -17,7 +18,7 @@ export async function POST(request) {
       { name: 'gpt-transcribe', format: 'json', chunking: false }
     ];
     for (const model of models) {
-      result = await transcribe(audio, language, key, model, requestId);
+      result = await transcribe(audio, language, prompt, key, model, requestId);
       if (!result.temporary && !result.ok) return respond({ error: result.data?.error?.message || 'Transcription failed.' }, result.status);
       if (result?.ok) break;
     }
@@ -43,13 +44,14 @@ export async function POST(request) {
 export async function OPTIONS() {
   return new Response(null, { status: 204, headers: corsHeaders() });
 }
-async function transcribe(audio, language, key, model, requestId) {
+async function transcribe(audio, language, prompt, key, model, requestId) {
   const form = new FormData();
   form.append('file', audio, audio.name || 'meeting.webm');
   form.append('model', model.name);
   form.append('response_format', model.format);
   if (model.chunking) form.append('chunking_strategy', 'auto');
   if (language && language !== 'auto') form.append('language', language);
+  if (prompt && !model.chunking) form.append('prompt', prompt);
   try {
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(60000)
