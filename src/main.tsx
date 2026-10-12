@@ -1602,7 +1602,7 @@ function App() {
     extra: Record<string, unknown> = {},
   ) {
     if (!session) throw new Error("Sign in before connecting a calendar.");
-    const response = await fetch("/api/calendar", {
+    const response = await fetch(`${API_BASE}/api/calendar`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -2028,7 +2028,7 @@ function App() {
   }
   async function analyzeMeeting(m: Meeting) {
     setProcessing("Generating AI meeting notes…");
-    const response = await fetch("/api/analyze", {
+    const response = await fetch(`${API_BASE}/api/analyze`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -2298,7 +2298,7 @@ function App() {
         form.append("language", m.language || language);
         if (m.customVocabulary?.trim())
           form.append("prompt", m.customVocabulary.trim());
-        const response = await fetch("/api/transcribe", {
+        const response = await fetch(`${API_BASE}/api/transcribe`, {
             method: "POST",
             body: form,
           }),
@@ -2726,7 +2726,7 @@ function App() {
     try {
       setProcessing("Searching this meeting…");
       setError("");
-      const response = await fetch("/api/ask", {
+      const response = await fetch(`${API_BASE}/api/ask`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -2986,7 +2986,7 @@ function App() {
     try {
       setProcessing("Drafting follow-up email…");
       setError("");
-      const response = await fetch("/api/followup", {
+      const response = await fetch(`${API_BASE}/api/followup`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
