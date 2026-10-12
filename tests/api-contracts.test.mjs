@@ -29,7 +29,7 @@ test('recordings use continuous checkpoints and durable manifests', async () => 
   const app = await read('src/main.tsx');
   const store = await read('src/recording-store.ts');
   assert.match(app, /mr\.start\(5000\)/);
-  assert.match(app, /appendRecordingChunk\(id,sequence,e\.data,duration\)/);
+  assert.match(app, /appendRecordingChunk\(id,\s*sequence,\s*e\.data,\s*duration\)/);
   assert.match(store, /backupStatus/);
   assert.match(store, /updatedAt/);
 });
