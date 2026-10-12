@@ -1,5 +1,6 @@
 import { json, options } from '../_lib/http.js';
 import { db, requireUser } from '../_lib/supabase.js';
+import { waitUntil } from '@vercel/functions';
 
 export async function POST(request) {
   const requestId = request.headers.get('x-client-request-id') || crypto.randomUUID();
@@ -28,6 +29,7 @@ export async function POST(request) {
       headers: { prefer: 'return=representation' }
     });
     const jobId = typeof created === 'string' ? created : created?.id || created?.[0]?.id;
+    kickWorker(request, requestId);
     return json(request, { jobId, status: 'queued', requestId }, 202, requestId);
   } catch (error) {
     console.error(JSON.stringify({ event: 'transcription_job_create_failed', requestId, error: error instanceof Error ? error.message : String(error) }));
@@ -36,3 +38,17 @@ export async function POST(request) {
 }
 
 export const OPTIONS = options;
+
+function kickWorker(request, requestId) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return;
+  const url = new URL('/api/transcription-jobs/process', request.url);
+  waitUntil(fetch(url, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${secret}`, 'x-client-request-id': requestId }
+  }).catch(error => console.error(JSON.stringify({
+    event: 'transcription_worker_dispatch_failed',
+    requestId,
+    error: error instanceof Error ? error.message : String(error)
+  }))));
+}

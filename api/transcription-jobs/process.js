@@ -1,6 +1,7 @@
 import { json } from '../_lib/http.js';
 import { db, downloadObject } from '../_lib/supabase.js';
 import { transcribeAudio } from '../_lib/transcription.js';
+import { waitUntil } from '@vercel/functions';
 
 const MAX_CHUNKS_PER_RUN = 4;
 const MAX_CHUNK_ATTEMPTS = 4;
@@ -19,7 +20,8 @@ async function run(request) {
       if (!chunk?.chunk_id) break;
       await processChunk(chunk, requestId);
     }
-    return json(request, { processed, requestId });
+    if (processed === MAX_CHUNKS_PER_RUN) continueDraining(request, requestId);
+    return json(request, { processed, continuing: processed === MAX_CHUNKS_PER_RUN, requestId });
   } catch (error) {
     console.error(JSON.stringify({ event: 'transcription_worker_failed', requestId, processed, error: error instanceof Error ? error.message : String(error) }));
     return json(request, { error: 'Worker run failed.', processed, requestId }, 500, requestId);
@@ -60,4 +62,17 @@ function authorized(request) {
   if (!expected) return false;
   const authorization = request.headers.get('authorization') || '';
   return authorization === `Bearer ${expected}`;
+}
+
+function continueDraining(request, requestId) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return;
+  waitUntil(fetch(new URL('/api/transcription-jobs/process', request.url), {
+    method: 'POST',
+    headers: { authorization: `Bearer ${secret}`, 'x-client-request-id': requestId }
+  }).catch(error => console.error(JSON.stringify({
+    event: 'transcription_worker_redispatch_failed',
+    requestId,
+    error: error instanceof Error ? error.message : String(error)
+  }))));
 }
