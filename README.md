@@ -1,5 +1,7 @@
 # Meeting Notes PWA
 
+> Cloudflare version: [meeting-notes-cloudflare](https://github.com/nikkimasani/meeting-notes-cloudflare) · https://meeting-notes-cloudflare.pages.dev
+
 A privacy-focused meeting workspace for recording, speaker-aware transcription, AI summaries, action items, decisions, follow-up emails, searchable organization, and cross-device sync.
 
 ## Features
