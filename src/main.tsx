@@ -106,6 +106,8 @@ type Meeting = {
   transcriptionJobId?: string;
   transcriptionState?: TranscriptionState;
   transcriptionProgress?: number;
+  transcriptionCompletedParts?: number;
+  transcriptionTotalParts?: number;
   transcriptionError?: string;
   attendees?: string;
   agenda?: string;
@@ -114,6 +116,19 @@ type Meeting = {
   archived?: boolean;
   notes?: string;
   followupEmail?: string;
+};
+type TranscriptionPartCheckpoint = {
+  index: number;
+  duration: number;
+  transcript: string;
+  segments: TranscriptSegment[];
+};
+type TranscriptionCheckpoint = {
+  version: 2;
+  partSeconds: number;
+  totalParts: number;
+  completed: TranscriptionPartCheckpoint[];
+  updatedAt: string;
 };
 const seed: Meeting[] = [
   {
@@ -227,12 +242,43 @@ const isIOSDevice = () =>
 const isStandaloneApp = () =>
   window.matchMedia("(display-mode: standalone)").matches ||
   !!(navigator as any).standalone;
+const TRANSCRIPTION_PART_SECONDS = 300;
+const transcriptionCheckpointKey = (meetingId: string) =>
+  `said-done-transcription-v2:${meetingId}`;
+const loadTranscriptionCheckpoint = (
+  meetingId: string,
+): TranscriptionCheckpoint | null => {
+  try {
+    const value = JSON.parse(
+      localStorage.getItem(transcriptionCheckpointKey(meetingId)) || "null",
+    );
+    return value?.version === 2 && Array.isArray(value.completed) ? value : null;
+  } catch {
+    return null;
+  }
+};
+const saveTranscriptionCheckpoint = (
+  meetingId: string,
+  checkpoint: TranscriptionCheckpoint,
+) => {
+  try {
+    localStorage.setItem(
+      transcriptionCheckpointKey(meetingId),
+      JSON.stringify(checkpoint),
+    );
+  } catch (error) {
+    console.warn("Could not save transcription checkpoint", error);
+  }
+};
+const clearTranscriptionCheckpoint = (meetingId: string) => {
+  localStorage.removeItem(transcriptionCheckpointKey(meetingId));
+};
 async function createTranscriptionParts(blob: Blob): Promise<Blob[]> {
   const context = new AudioContext();
   try {
     const decoded = await context.decodeAudioData(await blob.arrayBuffer());
     const targetRate = 16000,
-      secondsPerPart = 60,
+      secondsPerPart = TRANSCRIPTION_PART_SECONDS,
       sourceFramesPerPart = secondsPerPart * decoded.sampleRate,
       parts: Blob[] = [];
     for (
@@ -1182,6 +1228,8 @@ function App() {
   const chunkWrites = useRef<Promise<void>>(Promise.resolve());
   const audioLoading = useRef(new Set<string>());
   const jobPolling = useRef(new Set<string>());
+  const localTranscriptionRunning = useRef(new Set<string>());
+  const autoResumeAttempted = useRef(new Set<string>());
   const audioPlayer = useRef<HTMLAudioElement | null>(null);
   function showReminderFallback(
     title: string,
@@ -1414,7 +1462,10 @@ function App() {
             recovered.push({
               ...existing,
               transcript:
-                existing.transcript === "Processing audio…"
+                existing.transcript === "Processing audio…" &&
+                !["processing", "retrying"].includes(
+                  existing.transcriptionState || "",
+                )
                   ? "Recording recovered. Use “Transcribe recording” below when you are ready to retry."
                   : existing.transcript,
               audio: URL.createObjectURL(item.blob),
@@ -1469,6 +1520,50 @@ function App() {
         setError("Local recording recovery is unavailable in this browser."),
       );
   }, []);
+  useEffect(() => {
+    const pending = meetings
+      .filter(
+        (meeting) =>
+          meeting.localRecordingId &&
+          !meeting.transcriptionJobId &&
+          ["processing", "retrying", "partial"].includes(
+            meeting.transcriptionState || "",
+          ) &&
+          !autoResumeAttempted.current.has(meeting.id),
+      )
+      .sort((a, b) => +new Date(b.date) - +new Date(a.date))[0];
+    if (!pending?.localRecordingId) return;
+    autoResumeAttempted.current.add(pending.id);
+    void getRecording(pending.localRecordingId)
+      .then((stored) => {
+        if (!stored?.blob.size)
+          throw new Error("The saved recording could not be found.");
+        return processAudio(stored.blob, pending, false);
+      })
+      .catch((exception) =>
+        setMeetings((items) =>
+          items.map((item) =>
+            item.id === pending.id
+              ? {
+                  ...item,
+                  transcriptionState: "partial",
+                  transcriptionError:
+                    exception instanceof Error
+                      ? exception.message
+                      : "The interrupted transcription could not resume.",
+                }
+              : item,
+          ),
+        ),
+      );
+  }, [
+    meetings
+      .map(
+        (meeting) =>
+          `${meeting.id}:${meeting.transcriptionState || ""}:${meeting.localRecordingId || ""}`,
+      )
+      .join("|"),
+  ]);
   useEffect(() => {
     if (!recording) return;
     const unload = (event: BeforeUnloadEvent) => {
@@ -2109,8 +2204,11 @@ function App() {
         chunks.push({
           storagePath: path,
           durationSeconds: Math.min(
-            60,
-            Math.max(1, meeting.duration - index * 60),
+            TRANSCRIPTION_PART_SECONDS,
+            Math.max(
+              1,
+              meeting.duration - index * TRANSCRIPTION_PART_SECONDS,
+            ),
           ),
           bytes: part.size,
         });
@@ -2200,7 +2298,8 @@ function App() {
               start: (Number(segment.start) || 0) + offset,
               end: (Number(segment.end) || 0) + offset,
             });
-          offset += Number(envelope.durationSeconds) || 60;
+          offset +=
+            Number(envelope.durationSeconds) || TRANSCRIPTION_PART_SECONDS;
         }
         const transcript = segments.length
           ? segments
@@ -2270,22 +2369,94 @@ function App() {
   ) {
     if (preferBackground && (await queueBackgroundTranscription(blob, m)))
       return;
+    if (localTranscriptionRunning.current.has(m.id)) return;
+    localTranscriptionRunning.current.add(m.id);
     let activePart = 0,
-      totalParts = 0;
+      totalParts = 0,
+      checkpointParts: TranscriptionPartCheckpoint[] = [];
+    const buildSnapshot = (completed: TranscriptionPartCheckpoint[]) => {
+      const ordered = [...completed].sort((a, b) => a.index - b.index),
+        segments = ordered.flatMap((part) => part.segments),
+        transcript = ordered
+          .map((part) =>
+            part.segments.length
+              ? part.segments
+                  .map(
+                    (segment) =>
+                      `[${fmt(Math.round(segment.start))}] ${segment.speaker}: ${segment.text}`,
+                  )
+                  .join("\n")
+              : part.transcript,
+          )
+          .filter(Boolean)
+          .join("\n\n"),
+        duration = ordered.reduce((total, part) => total + part.duration, 0);
+      return { ordered, segments, transcript, duration };
+    };
     try {
       setError("");
       setProcessing("Preparing recording…");
-      const parts = await createTranscriptionParts(blob),
-        segments: TranscriptSegment[] = [],
-        transcripts: string[] = [];
+      setMeetings((items) =>
+        items.map((item) =>
+          item.id === m.id
+            ? {
+                ...item,
+                transcriptionState: "processing",
+                transcriptionError: undefined,
+                summary:
+                  !item.summary ||
+                  /not available|no discussion took place|recovered from|will appear after transcription|creating ai meeting notes/i.test(
+                    item.summary,
+                  )
+                    ? "Transcription is in progress. You can leave this meeting and return; completed parts are saved automatically."
+                    : item.summary,
+              }
+            : item,
+        ),
+      );
+      const parts = await createTranscriptionParts(blob);
       totalParts = parts.length;
-      let offset = 0;
+      const saved = loadTranscriptionCheckpoint(m.id);
+      if (
+        saved?.partSeconds === TRANSCRIPTION_PART_SECONDS &&
+        saved.totalParts === totalParts
+      )
+        checkpointParts = saved.completed.filter(
+          (part) =>
+            Number.isInteger(part.index) &&
+            part.index >= 0 &&
+            part.index < totalParts,
+        );
+      const completedByIndex = new Map(
+        checkpointParts.map((part) => [part.index, part]),
+      );
+      const initial = buildSnapshot([...completedByIndex.values()]);
+      setMeetings((items) =>
+        items.map((item) =>
+          item.id === m.id
+            ? {
+                ...item,
+                transcriptionState: completedByIndex.size
+                  ? "retrying"
+                  : "processing",
+                transcriptionProgress: completedByIndex.size / totalParts,
+                transcriptionCompletedParts: completedByIndex.size,
+                transcriptionTotalParts: totalParts,
+                transcript: initial.transcript || item.transcript,
+                transcriptSegments: initial.segments.length
+                  ? initial.segments
+                  : item.transcriptSegments,
+              }
+            : item,
+        ),
+      );
       for (let index = 0; index < parts.length; index++) {
+        if (completedByIndex.has(index)) continue;
         activePart = index + 1;
         const part = parts[index];
         setProcessing(
           parts.length > 1
-            ? `Transcribing recording… (${index + 1}/${parts.length})`
+            ? `${completedByIndex.size ? "Resuming" : "Transcribing"} recording… (${index + 1}/${parts.length})`
             : "Transcribing recording…",
         );
         const form = new FormData(),
@@ -2298,11 +2469,25 @@ function App() {
         form.append("language", m.language || language);
         if (m.customVocabulary?.trim())
           form.append("prompt", m.customVocabulary.trim());
-        const response = await fetch(`${API_BASE}/api/transcribe`, {
-            method: "POST",
-            body: form,
-          }),
-          raw = await response.text();
+        let response: Response | undefined;
+        for (let attempt = 0; attempt < 3 && !response; attempt++) {
+          try {
+            response = await fetch(`${API_BASE}/api/transcribe`, {
+              method: "POST",
+              body: form,
+            });
+          } catch {
+            if (attempt === 2)
+              throw new Error(
+                "The connection dropped. Completed parts are saved and will not be repeated.",
+              );
+            await new Promise((resolve) =>
+              setTimeout(resolve, 1500 * (attempt + 1)),
+            );
+          }
+        }
+        if (!response) throw new Error("Transcription request failed.");
+        const raw = await response.text();
         let data: any;
         try {
           data = JSON.parse(raw);
@@ -2321,7 +2506,8 @@ function App() {
           throw new Error(
             data.error || `Transcription failed (${response.status}).`,
           );
-        const partSegments: TranscriptSegment[] = Array.isArray(data.segments)
+        const offset = index * TRANSCRIPTION_PART_SECONDS,
+          partSegments: TranscriptSegment[] = Array.isArray(data.segments)
           ? data.segments
               .filter((x: any) => x && typeof x.text === "string")
               .map((x: any) => ({
@@ -2331,38 +2517,111 @@ function App() {
                 end: (Number(x.end) || 0) + offset,
               }))
           : [];
-        segments.push(...partSegments);
-        if (typeof data.transcript === "string" && data.transcript.trim())
-          transcripts.push(data.transcript.trim());
-        offset += Number(data.duration) || 60;
+        const completedPart: TranscriptionPartCheckpoint = {
+          index,
+          duration:
+            Number(data.duration) ||
+            Math.min(
+              TRANSCRIPTION_PART_SECONDS,
+              Math.max(1, m.duration - offset),
+            ),
+          transcript:
+            typeof data.transcript === "string" ? data.transcript.trim() : "",
+          segments: partSegments,
+        };
+        completedByIndex.set(index, completedPart);
+        checkpointParts = [...completedByIndex.values()];
+        saveTranscriptionCheckpoint(m.id, {
+          version: 2,
+          partSeconds: TRANSCRIPTION_PART_SECONDS,
+          totalParts,
+          completed: checkpointParts,
+          updatedAt: new Date().toISOString(),
+        });
+        const partial = buildSnapshot(checkpointParts);
+        setMeetings((items) =>
+          items.map((item) =>
+            item.id === m.id
+              ? {
+                  ...item,
+                  transcriptionState: "processing",
+                  transcriptionProgress: completedByIndex.size / totalParts,
+                  transcriptionCompletedParts: completedByIndex.size,
+                  transcriptionTotalParts: totalParts,
+                  transcriptionError: undefined,
+                  transcript: partial.transcript || item.transcript,
+                  transcriptSegments: partial.segments,
+                }
+              : item,
+          ),
+        );
       }
-      const transcript = segments.length
-        ? segments
-            .map((x) => `[${fmt(Math.round(x.start))}] ${x.speaker}: ${x.text}`)
-            .join("\n")
-        : transcripts.join("\n\n");
+      const completed = buildSnapshot([...completedByIndex.values()]),
+        transcript = completed.transcript;
       if (!transcript)
         throw new Error("No speech was detected in this recording.");
       const withTranscript = {
         ...m,
         transcript,
-        transcriptSegments: segments,
-        duration: m.duration || Math.round(offset),
+        transcriptSegments: completed.segments,
+        duration: m.duration || Math.round(completed.duration),
         transcriptionState: "complete" as const,
         transcriptionProgress: 1,
+        transcriptionCompletedParts: totalParts,
+        transcriptionTotalParts: totalParts,
+        transcriptionError: undefined,
       };
       setMeetings((v) =>
         v.map((x) => (x.id === m.id ? { ...x, ...withTranscript } : x)),
       );
-      await analyzeMeeting(withTranscript);
+      clearTranscriptionCheckpoint(m.id);
+      try {
+        await analyzeMeeting(withTranscript);
+      } catch (analysisError) {
+        const detail =
+          analysisError instanceof Error
+            ? analysisError.message
+            : "Meeting-note generation failed.";
+        setError(`Transcript complete, but the summary could not be generated. ${detail}`);
+        setMeetings((items) =>
+          items.map((item) =>
+            item.id === m.id
+              ? { ...item, transcriptionState: "complete", transcriptionError: detail }
+              : item,
+          ),
+        );
+      }
     } catch (e) {
       const detail = e instanceof Error ? e.message : "AI processing failed";
-      setError(
-        totalParts > 1 && activePart
-          ? `Transcription stopped at part ${activePart} of ${totalParts}. ${detail}`
-          : detail,
+      const partial = buildSnapshot(checkpointParts),
+        completedCount = checkpointParts.length,
+        message =
+          totalParts > 1
+            ? `Transcription paused after saving ${completedCount} of ${totalParts} parts. Resume to continue with part ${Math.min(completedCount + 1, totalParts)}. ${detail}`
+            : detail;
+      setError(message);
+      setMeetings((items) =>
+        items.map((item) =>
+          item.id === m.id
+            ? {
+                ...item,
+                transcriptionState: completedCount ? "partial" : "failed",
+                transcriptionProgress: totalParts
+                  ? completedCount / totalParts
+                  : 0,
+                transcriptionCompletedParts: completedCount,
+                transcriptionTotalParts: totalParts || undefined,
+                transcriptionError: message,
+                transcript: partial.transcript || item.transcript,
+                transcriptSegments: partial.segments.length
+                  ? partial.segments
+                  : item.transcriptSegments,
+              }
+            : item,
+        ),
       );
     } finally {
+      localTranscriptionRunning.current.delete(m.id);
       setProcessing("");
     }
   }
@@ -2588,6 +2847,9 @@ function App() {
         transcriptionJobId: r.metadata?.transcriptionJobId,
         transcriptionState: r.metadata?.transcriptionState,
         transcriptionProgress: r.metadata?.transcriptionProgress,
+        transcriptionCompletedParts:
+          r.metadata?.transcriptionCompletedParts,
+        transcriptionTotalParts: r.metadata?.transcriptionTotalParts,
         transcriptionError: r.metadata?.transcriptionError,
         attendees: r.metadata?.attendees || "",
         agenda: r.metadata?.agenda || "",
@@ -2661,6 +2923,8 @@ function App() {
           transcriptionJobId: m.transcriptionJobId,
           transcriptionState: m.transcriptionState,
           transcriptionProgress: m.transcriptionProgress,
+          transcriptionCompletedParts: m.transcriptionCompletedParts,
+          transcriptionTotalParts: m.transcriptionTotalParts,
           transcriptionError: m.transcriptionError,
           attendees: m.attendees || "",
           agenda: m.agenda || "",
@@ -3670,7 +3934,9 @@ function App() {
                   <span>
                     {current.transcriptionState &&
                     current.transcriptionState !== "complete"
-                      ? `Background transcription: ${current.transcriptionState} · ${Math.round((current.transcriptionProgress || 0) * 100)}%`
+                      ? current.transcriptionTotalParts
+                        ? `Transcription ${current.transcriptionState} · ${current.transcriptionCompletedParts || 0}/${current.transcriptionTotalParts} parts saved`
+                        : `Transcription ${current.transcriptionState} · ${Math.round((current.transcriptionProgress || 0) * 100)}%`
                       : current.recordingBackupStatus === "cloud"
                       ? "Backed up to the cloud"
                       : current.recordingBackupStatus === "uploading"
@@ -3717,9 +3983,10 @@ function App() {
                     }
                   >
                     {current.transcriptionState === "failed" ||
-                    current.transcriptionState === "partial" ||
                     current.transcriptionState === "canceled"
                       ? "Retry transcription"
+                      : current.transcriptionState === "partial"
+                        ? "Resume transcription"
                       : "Transcribe recording"}
                   </button>
                 )}
