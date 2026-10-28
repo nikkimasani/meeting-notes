@@ -41,6 +41,7 @@ test('long local transcriptions are resumable and use server-safe parallel parts
   assert.match(app, /TRANSCRIPTION_CONCURRENCY = 3/);
   assert.match(app, /awaiting_sign_in/);
   assert.match(app, /you may close the app while transcription continues/i);
+  assert.match(app, /autoBackgroundQueueAttempted/);
   assert.match(app, /saveTranscriptionCheckpoint\(m\.id/);
   assert.match(app, /loadTranscriptionCheckpoint\(m\.id\)/);
   assert.match(app, /completedByIndex\.has\(index\)/);
