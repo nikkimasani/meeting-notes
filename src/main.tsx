@@ -1237,6 +1237,7 @@ function App() {
   const jobPolling = useRef(new Set<string>());
   const localTranscriptionRunning = useRef(new Set<string>());
   const autoResumeAttempted = useRef(new Set<string>());
+  const autoBackgroundQueueAttempted = useRef(new Set<string>());
   const audioPlayer = useRef<HTMLAudioElement | null>(null);
   function showReminderFallback(
     title: string,
@@ -1568,6 +1569,53 @@ function App() {
       .map(
         (meeting) =>
           `${meeting.id}:${meeting.transcriptionState || ""}:${meeting.localRecordingId || ""}`,
+      )
+      .join("|"),
+  ]);
+  useEffect(() => {
+    if (!session) return;
+    const pending = meetings
+      .filter(
+        (meeting) =>
+          meeting.localRecordingId &&
+          !meeting.transcriptionJobId &&
+          meeting.transcriptionState === "awaiting_sign_in" &&
+          !autoBackgroundQueueAttempted.current.has(meeting.id),
+      )
+      .sort((a, b) => +new Date(b.date) - +new Date(a.date))[0];
+    if (!pending?.localRecordingId) return;
+    autoBackgroundQueueAttempted.current.add(pending.id);
+    void getRecording(pending.localRecordingId)
+      .then((stored) => {
+        if (!stored?.blob.size)
+          throw new Error("The saved recording could not be found.");
+        return queueBackgroundTranscription(stored.blob, pending, true);
+      })
+      .then((queued) => {
+        if (queued) setSettingsOpen(false);
+      })
+      .catch((exception) =>
+        setMeetings((items) =>
+          items.map((item) =>
+            item.id === pending.id
+              ? {
+                  ...item,
+                  transcriptionState: "failed",
+                  transcriptionError:
+                    exception instanceof Error
+                      ? exception.message
+                      : "Background transcription could not start.",
+                }
+              : item,
+          ),
+        ),
+      );
+  }, [
+    session,
+    meetings
+      .map(
+        (meeting) =>
+          `${meeting.id}:${meeting.transcriptionState || ""}:${meeting.transcriptionJobId || ""}`,
       )
       .join("|"),
   ]);
