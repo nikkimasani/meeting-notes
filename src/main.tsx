@@ -242,7 +242,10 @@ const isIOSDevice = () =>
 const isStandaloneApp = () =>
   window.matchMedia("(display-mode: standalone)").matches ||
   !!(navigator as any).standalone;
-const TRANSCRIPTION_PART_SECONDS = 300;
+// Vercel rejects request bodies above roughly 4.5 MB. A 110-second,
+// 16 kHz mono PCM WAV is about 3.5 MB, leaving room for multipart headers.
+const TRANSCRIPTION_PART_SECONDS = 110;
+const TRANSCRIPTION_CONCURRENCY = 3;
 const transcriptionCheckpointKey = (meetingId: string) =>
   `said-done-transcription-v2:${meetingId}`;
 const loadTranscriptionCheckpoint = (
@@ -2450,10 +2453,20 @@ function App() {
             : item,
         ),
       );
-      for (let index = 0; index < parts.length; index++) {
-        if (completedByIndex.has(index)) continue;
+      const pendingIndexes = parts
+        .map((_, index) => index)
+        .filter((index) => !completedByIndex.has(index));
+      let nextPendingIndex = 0;
+      const transcribeNext = async () => {
+        while (nextPendingIndex < pendingIndexes.length) {
+          const index = pendingIndexes[nextPendingIndex++];
+          if (completedByIndex.has(index)) continue;
         activePart = index + 1;
         const part = parts[index];
+        if (part.size > 4 * 1024 * 1024)
+          throw new Error(
+            "An audio part is too large to upload. Your recording is safe; refresh the app to load the latest audio encoder.",
+          );
         setProcessing(
           parts.length > 1
             ? `${completedByIndex.size ? "Resuming" : "Transcribing"} recording… (${index + 1}/${parts.length})`
@@ -2555,7 +2568,19 @@ function App() {
               : item,
           ),
         );
-      }
+        }
+      };
+      await Promise.all(
+        Array.from(
+          {
+            length: Math.min(
+              TRANSCRIPTION_CONCURRENCY,
+              pendingIndexes.length,
+            ),
+          },
+          () => transcribeNext(),
+        ),
+      );
       const completed = buildSnapshot([...completedByIndex.values()]),
         transcript = completed.transcript;
       if (!transcript)
