@@ -53,6 +53,10 @@ async function processChunk(chunk, requestId) {
       method: 'POST',
       body: JSON.stringify({ p_chunk_id: chunk.chunk_id, p_error: error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000), p_terminal: terminal })
     });
+    if (!terminal) {
+      const retryDelayMs = Math.min(30000, Math.pow(2, Math.max(Number(chunk.attempt_count), 1)) * 5000);
+      await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+    }
     console.warn(JSON.stringify({ event: 'transcription_chunk_failed', requestId, jobId: chunk.job_id, chunkId: chunk.chunk_id, sequence: chunk.sequence, attempt: chunk.attempt_count, terminal, error: error instanceof Error ? error.message : String(error) }));
   }
 }
