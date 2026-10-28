@@ -67,6 +67,7 @@ type ActionItem = {
   priority?: "low" | "medium" | "high";
 };
 type TranscriptionState =
+  | "awaiting_sign_in"
   | "uploading"
   | "queued"
   | "processing"
@@ -245,6 +246,7 @@ const isStandaloneApp = () =>
 // Keep browser-generated WAV uploads below the 4.5 MB platform limit. A 110-second,
 // 16 kHz mono PCM WAV is about 3.5 MB, leaving room for multipart headers.
 const TRANSCRIPTION_PART_SECONDS = 110;
+const BACKGROUND_TRANSCRIPTION_PART_SECONDS = 600;
 const TRANSCRIPTION_CONCURRENCY = 3;
 const transcriptionCheckpointKey = (meetingId: string) =>
   `said-done-transcription-v2:${meetingId}`;
@@ -276,12 +278,14 @@ const saveTranscriptionCheckpoint = (
 const clearTranscriptionCheckpoint = (meetingId: string) => {
   localStorage.removeItem(transcriptionCheckpointKey(meetingId));
 };
-async function createTranscriptionParts(blob: Blob): Promise<Blob[]> {
+async function createTranscriptionParts(
+  blob: Blob,
+  secondsPerPart = TRANSCRIPTION_PART_SECONDS,
+): Promise<Blob[]> {
   const context = new AudioContext();
   try {
     const decoded = await context.decodeAudioData(await blob.arrayBuffer());
     const targetRate = 16000,
-      secondsPerPart = TRANSCRIPTION_PART_SECONDS,
       sourceFramesPerPart = secondsPerPart * decoded.sampleRate,
       parts: Blob[] = [];
     for (
@@ -1541,7 +1545,7 @@ function App() {
       .then((stored) => {
         if (!stored?.blob.size)
           throw new Error("The saved recording could not be found.");
-        return processAudio(stored.blob, pending, false);
+        return processAudio(stored.blob, pending, true);
       })
       .catch((exception) =>
         setMeetings((items) =>
@@ -2179,7 +2183,10 @@ function App() {
             : item,
         ),
       );
-      const parts = await createTranscriptionParts(blob);
+      const parts = await createTranscriptionParts(
+        blob,
+        BACKGROUND_TRANSCRIPTION_PART_SECONDS,
+      );
       const chunks = [];
       for (let index = 0; index < parts.length; index++) {
         const part = parts[index];
@@ -2207,10 +2214,10 @@ function App() {
         chunks.push({
           storagePath: path,
           durationSeconds: Math.min(
-            TRANSCRIPTION_PART_SECONDS,
+            BACKGROUND_TRANSCRIPTION_PART_SECONDS,
             Math.max(
               1,
-              meeting.duration - index * TRANSCRIPTION_PART_SECONDS,
+              meeting.duration - index * BACKGROUND_TRANSCRIPTION_PART_SECONDS,
             ),
           ),
           bytes: part.size,
@@ -2263,9 +2270,9 @@ function App() {
           item.id === meeting.id
             ? {
                 ...item,
-                transcriptionState: undefined,
-                transcriptionProgress: undefined,
-                transcriptionError: `Using immediate transcription instead. ${detail}`,
+                transcriptionState: "failed",
+                transcriptionProgress: 0,
+                transcriptionError: `Background transcription could not start. Your recording is safe. ${detail}`,
               }
             : item,
         ),
@@ -2370,8 +2377,30 @@ function App() {
     m: Meeting,
     preferBackground = true,
   ) {
-    if (preferBackground && (await queueBackgroundTranscription(blob, m)))
+    if (preferBackground) {
+      if (!session) {
+        setMeetings((items) =>
+          items.map((item) =>
+            item.id === m.id
+              ? {
+                  ...item,
+                  transcriptionState: "awaiting_sign_in",
+                  transcriptionProgress: 0,
+                  transcriptionError:
+                    "Sign in once to upload this recording securely. After upload, you may close the app while transcription continues.",
+                }
+              : item,
+          ),
+        );
+        setCloudStatus(
+          "Sign in to start durable background transcription. Your recording remains saved on this device.",
+        );
+        setSettingsOpen(true);
+        return;
+      }
+      await queueBackgroundTranscription(blob, m);
       return;
+    }
     if (localTranscriptionRunning.current.has(m.id)) return;
     localTranscriptionRunning.current.add(m.id);
     let activePart = 0,
@@ -2661,15 +2690,11 @@ function App() {
         throw new Error(
           "The saved recording could not be found on this device.",
         );
-      if (session) {
-        const queued = await queueBackgroundTranscription(
-          stored.blob,
-          { ...current, transcriptionJobId: undefined },
-          true,
-        );
-        if (queued) return;
-      }
-      await processAudio(stored.blob, current, false);
+      await processAudio(
+        stored.blob,
+        { ...current, transcriptionJobId: undefined },
+        true,
+      );
     } catch (e) {
       setError(
         e instanceof Error
