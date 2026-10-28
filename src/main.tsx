@@ -242,7 +242,7 @@ const isIOSDevice = () =>
 const isStandaloneApp = () =>
   window.matchMedia("(display-mode: standalone)").matches ||
   !!(navigator as any).standalone;
-// Vercel rejects request bodies above roughly 4.5 MB. A 110-second,
+// Keep browser-generated WAV uploads below the 4.5 MB platform limit. A 110-second,
 // 16 kHz mono PCM WAV is about 3.5 MB, leaving room for multipart headers.
 const TRANSCRIPTION_PART_SECONDS = 110;
 const TRANSCRIPTION_CONCURRENCY = 3;
