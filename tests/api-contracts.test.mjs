@@ -37,7 +37,10 @@ test('recordings use continuous checkpoints and durable manifests', async () => 
 test('long local transcriptions are resumable and use server-safe parallel parts', async () => {
   const app = await read('src/main.tsx');
   assert.match(app, /TRANSCRIPTION_PART_SECONDS = 110/);
+  assert.match(app, /BACKGROUND_TRANSCRIPTION_PART_SECONDS = 600/);
   assert.match(app, /TRANSCRIPTION_CONCURRENCY = 3/);
+  assert.match(app, /awaiting_sign_in/);
+  assert.match(app, /you may close the app while transcription continues/i);
   assert.match(app, /saveTranscriptionCheckpoint\(m\.id/);
   assert.match(app, /loadTranscriptionCheckpoint\(m\.id\)/);
   assert.match(app, /completedByIndex\.has\(index\)/);
