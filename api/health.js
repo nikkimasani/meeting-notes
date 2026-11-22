@@ -1,5 +1,7 @@
 import { json } from './_lib/http.js';
 import { respond, NOTES_MODEL } from './_lib/openai.js';
+import { POST as notesPost } from './notes.js';
+import { POST as chatPost } from './chat.js';
 
 // GET /api/health          -> configuration check
 // GET /api/health?deep=1   -> speaks a short sentence with TTS, transcribes it
@@ -44,6 +46,21 @@ export async function GET(request) {
     await step('notes', async () => {
       const text = await respond(key, { model: NOTES_MODEL, input: `Summarize in one sentence: ${transcript}` });
       return text.slice(0, 200);
+    });
+  }
+  if (transcript) {
+    const lines = `[0:00] Speaker 1: ${transcript}\n[0:09] Speaker 2: Sounds good, I will book the launch room for Thursday.`;
+    await step('notesEndpoint', async () => {
+      const r = await notesPost(new Request(request.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ transcript: lines, speakers: ['Speaker 1', 'Speaker 2'] }) }));
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      return { title: data.title, outline: data.outline.length, actions: data.action_items.map(a => a.task) };
+    });
+    await step('chatEndpoint', async () => {
+      const r = await chatPost(new Request(request.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ context: lines, messages: [{ role: 'user', content: 'Who is sending the budget?' }] }) }));
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      return data.answer.slice(0, 160);
     });
   }
   return json(request, out, out.ok ? 200 : 502);
