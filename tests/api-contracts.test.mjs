@@ -8,7 +8,7 @@ test('transcription uploads are bounded and return request references', async ()
   const source = await read('api/transcribe.js');
   assert.match(source, /24 \* 1024 \* 1024/);
   assert.match(source, /x-transcription-request-id/);
-  assert.match(source, /AbortSignal\.timeout\(60000\)/);
+  assert.match(source, /AbortSignal\.timeout\(120000\)/);
 });
 
 test('background worker requires a server-side bearer secret', async () => {

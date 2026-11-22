@@ -11,17 +11,33 @@ export async function POST(request) {
     if (audio.size > 24 * 1024 * 1024) return respond({ error: 'Recording is larger than 24 MB. Import a shorter recording.' }, 413);
     const language = incoming.get('language');
     const prompt = String(incoming.get('prompt') || '').slice(0, 1000);
+    const mode = String(incoming.get('mode') || 'diarize');
+    let knownNames = [], knownRefs = [];
+    try {
+      knownNames = JSON.parse(String(incoming.get('knownSpeakerNames') || '[]'));
+      knownRefs = JSON.parse(String(incoming.get('knownSpeakerReferences') || '[]'));
+    } catch {}
+    if (!Array.isArray(knownNames) || !Array.isArray(knownRefs) || knownNames.length !== knownRefs.length) { knownNames = []; knownRefs = []; }
+    knownNames = knownNames.slice(0, 4).map(String);
+    knownRefs = knownRefs.slice(0, 4).map(String).filter(ref => ref.startsWith('data:audio/'));
+    if (knownRefs.length !== knownNames.length) { knownNames = []; knownRefs = []; }
     console.info(JSON.stringify({ event: 'transcription_started', requestId, bytes: audio.size, type: audio.type }));
     let result;
-    const models = [
-      { name: 'gpt-4o-transcribe-diarize', format: 'diarized_json', chunking: true },
-      { name: 'gpt-transcribe', format: 'json', chunking: false }
-    ];
+    const diarize = { name: 'gpt-4o-transcribe-diarize', format: 'diarized_json', chunking: true, knownNames: [], knownRefs: [] };
+    const plain = { name: 'gpt-4o-transcribe', format: 'json', chunking: false };
+    const models = mode === 'fast'
+      ? [plain]
+      : knownNames.length
+        ? [{ ...diarize, knownNames, knownRefs }, diarize, plain]
+        : [diarize, plain];
+    let lastError = '';
     for (const model of models) {
       result = await transcribe(audio, language, prompt, key, model, requestId);
-      if (!result.temporary && !result.ok) return respond({ error: result.data?.error?.message || 'Transcription failed.' }, result.status);
       if (result?.ok) break;
+      lastError = result.data?.error?.message || lastError;
+      if (result.status === 401 || result.status === 403) return respond({ error: lastError || 'The AI key was rejected.' }, result.status);
     }
+    if (!result?.ok && lastError) return respond({ error: lastError, model: 'none' }, result?.status || 502);
     if (!result?.ok || !result.data) return respond({ error: 'The transcription service is temporarily unavailable. Your recording is safe; please try again shortly.' }, 502);
     const data = result.data;
     const segments = Array.isArray(data.segments) ? data.segments.filter(segment => segment && segment.text).map(segment => ({
@@ -35,7 +51,7 @@ export async function POST(request) {
       ? segments.map(segment => `[${stamp(segment.start)}] ${segment.speaker}: ${segment.text}`).join('\n\n')
       : data.text || '';
     console.info(JSON.stringify({ event: 'transcription_completed', requestId, elapsedMs: Date.now() - startedAt, transcriptChars: transcript.length }));
-    return respond({ transcript, segments, duration: Number(data.duration) || 0 });
+    return respond({ transcript, segments, text: data.text || '', duration: Number(data.duration) || 0 });
   } catch (error) {
     console.error(JSON.stringify({ event: 'transcription_failed', requestId, elapsedMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) }));
     return respond({ error: error instanceof Error ? error.message : 'Transcription failed.' }, 500);
@@ -52,9 +68,13 @@ async function transcribe(audio, language, prompt, key, model, requestId) {
   if (model.chunking) form.append('chunking_strategy', 'auto');
   if (language && language !== 'auto') form.append('language', language);
   if (prompt && !model.chunking) form.append('prompt', prompt);
+  (model.knownNames || []).forEach((name, i) => {
+    form.append('known_speaker_names[]', name);
+    form.append('known_speaker_references[]', model.knownRefs[i]);
+  });
   try {
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(60000)
+      method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(120000)
     });
     const raw = await response.text();
     let data;

@@ -6,7 +6,21 @@
     },
     "api/transcription-jobs/process.js": {
       "maxDuration": 300
+    },
+    "api/notes.js": {
+      "maxDuration": 120
+    },
+    "api/chat.js": {
+      "maxDuration": 120
+    },
+    "api/health.js": {
+      "maxDuration": 120
     }
   },
-  "crons": [{ "path": "/api/transcription-jobs/process", "schedule": "0 3 * * *" }]
+  "crons": [
+    {
+      "path": "/api/transcription-jobs/process",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }
