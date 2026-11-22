@@ -15,6 +15,9 @@
     },
     "api/health.js": {
       "maxDuration": 120
+    },
+    "api/bot.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
