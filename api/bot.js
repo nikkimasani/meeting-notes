@@ -122,7 +122,7 @@ export async function POST(request) {
       const when = joinAt ? new Date(joinAt) : null;
       const payload = {
         meeting_url: parsed.toString(),
-        bot_name: String(botName || 'Said & Done Notetaker').slice(0, 100),
+        bot_name: String(botName || 'Recapp Notetaker').slice(0, 100),
         recording_config: {
           transcript: { provider: { recallai_streaming: { mode: 'prioritize_accuracy', language_code: 'auto' } } },
           audio_mixed_mp3: {}

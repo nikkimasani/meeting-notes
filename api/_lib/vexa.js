@@ -49,7 +49,7 @@ export async function vexaCreate({ meetingUrl, joinAt, botName }) {
   const when = joinAt ? new Date(joinAt) : null;
   if (when && when.getTime() - Date.now() > 2 * 60 * 1000) {
     // A one-off plan for this single meeting — Vexa sends the bot ~60 s before the start time.
-    const res = await vexa('/meetings', { method: 'POST', body: JSON.stringify({ title: 'Said & Done', scheduled_at: when.toISOString(), meeting_url: meetingUrl, auto_join: true }) });
+    const res = await vexa('/meetings', { method: 'POST', body: JSON.stringify({ title: 'Recapp', scheduled_at: when.toISOString(), meeting_url: meetingUrl, auto_join: true }) });
     const data = await readJson(res);
     if (!res.ok) throw Object.assign(new Error(errText(data)), { status: res.status });
     return { id, joinAt: when.toISOString(), scheduled: true };
@@ -58,7 +58,7 @@ export async function vexaCreate({ meetingUrl, joinAt, botName }) {
     platform: parsed.platform,
     native_meeting_id: parsed.id,
     meeting_url: meetingUrl,
-    bot_name: botName || 'Said & Done Notetaker',
+    bot_name: botName || 'Recapp Notetaker',
     transcribe_enabled: true,
     recording_enabled: true,
     ...(parsed.passcode ? { passcode: parsed.passcode } : {})

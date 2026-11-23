@@ -16,9 +16,12 @@ const schema = {
     decisions: list,
     key_points: list,
     open_questions: list,
-    topics: list
+    topics: list,
+    sentiment: { type: 'object', additionalProperties: false, properties: {
+      positive: { type: 'number' }, neutral: { type: 'number' }, negative: { type: 'number' }, tone: { type: 'string' }
+    }, required: ['positive', 'neutral', 'negative', 'tone'] }
   },
-  required: ['title', 'summary', 'outline', 'action_items', 'decisions', 'key_points', 'open_questions', 'topics']
+  required: ['title', 'summary', 'outline', 'action_items', 'decisions', 'key_points', 'open_questions', 'topics', 'sentiment']
 };
 
 export async function POST(request) {
@@ -36,6 +39,7 @@ export async function POST(request) {
         'Write 3-8 outline sections for most meetings, each with a concrete heading (not "Introduction") and 1-4 short factual bullets that mention who said what when useful.',
         'Action items: only tasks someone committed to or was asked to do. Owner is a speaker or named person, or null. Due is the phrase used ("Friday", "next week") or an ISO date, else null. Start is the time in seconds where it was discussed.',
         'Title: a specific 3-7 word title for the meeting. If a title was supplied and is specific, keep it.',
+        'Sentiment: estimate the share of the conversation that was positive, neutral and negative as whole-number percentages that add up to 100, and give the overall tone in 2-5 words (for example "Upbeat and decisive").',
         'Never invent facts. If the transcript is very short or empty of substance, say so plainly in the summary and leave lists empty.'
       ].join(' '),
       input: `Supplied title: ${title || '(none)'}\nToday: ${today}\nSpeakers: ${speakers.join(', ')}\n\nTranscript:\n${transcript}`,

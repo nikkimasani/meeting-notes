@@ -1,30 +1,32 @@
-export const config = { runtime: 'edge' };
+import { json, options } from './_lib/http.js';
+import { respond, NOTES_MODEL } from './_lib/openai.js';
 
-export default async function handler(request) {
-  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+const schema = {
+  type: 'object', additionalProperties: false,
+  properties: { subject: { type: 'string' }, body: { type: 'string' } },
+  required: ['subject', 'body']
+};
+
+export async function POST(request) {
   const key = process.env.OPENAI_API_KEY;
-  if (!key) return json({ error: 'AI service is not configured.' }, 503);
+  if (!key) return json(request, { error: 'AI service is not configured.' }, 503);
   try {
-    const { title = 'Meeting', attendees = '', summary = '', actions = [], decisions = [], openQuestions = [] } = await request.json();
-    if (!summary.trim()) return json({ error: 'Generate a meeting summary first.' }, 400);
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4.1-mini',
-        instructions: 'Draft a concise professional follow-up email. Use only the supplied meeting information. Include a clear subject, brief recap, decisions, action items with owners or due dates when supplied, and unresolved questions. Do not invent facts. Return plain text.',
-        input: `Title: ${title}\nAttendees: ${attendees || 'Not listed'}\n\nSummary:\n${summary.slice(0, 30000)}\n\nDecisions:\n${decisions.join('\n')}\n\nAction items:\n${actions.join('\n')}\n\nOpen questions:\n${openQuestions.join('\n')}`
-      })
+    const { context = '', tone = 'friendly' } = await request.json();
+    if (!String(context).trim()) return json(request, { error: 'There is nothing to write a follow-up from yet.' }, 400);
+    const text = await respond(key, {
+      model: NOTES_MODEL,
+      instructions: [
+        'Write the follow-up email the meeting organizer would send to the other attendees after this meeting.',
+        `Tone: ${String(tone).slice(0, 40)}, professional, plain language.`,
+        'Body: a one-line thank-you, a 2-3 sentence recap, then short sections "Decisions", "Next steps" (owner and due date when known) and "Open questions" only when they have content. End with a short sign-off without a name.',
+        'Use only facts from the meeting material. Do not invent dates, owners or numbers. Plain text, no markdown headings; use "- " bullets.'
+      ].join(' '),
+      input: `Meeting material:\n${String(context).slice(0, 200000)}`,
+      text: { format: { type: 'json_schema', name: 'followup_email', strict: true, schema } }
     });
-    const data = await response.json();
-    if (!response.ok) return json({ error: data.error?.message || 'Follow-up draft failed.' }, response.status);
-    const email = data.output?.flatMap(item => item.content || []).find(item => item.type === 'output_text')?.text;
-    return json({ email: email || 'No email draft was returned.' });
+    return json(request, JSON.parse(text));
   } catch (error) {
-    return json({ error: error instanceof Error ? error.message : 'Follow-up draft failed.' }, 500);
+    return json(request, { error: error.message || 'Could not draft the email.' }, error.status && error.status < 600 ? error.status : 500);
   }
 }
-
-function json(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-}
+export const OPTIONS = options;
