@@ -25,26 +25,17 @@ test('job creation validates ownership and chunk limits', async () => {
   assert.match(source, /startsWith\(`\$\{user\.id\}\//);
 });
 
-test('recordings use continuous checkpoints and durable manifests', async () => {
-  const app = await read('src/main.tsx');
-  const store = await read('src/recording-store.ts');
-  assert.match(app, /mr\.start\(5000\)/);
-  assert.match(app, /appendRecordingChunk\(id,\s*sequence,\s*e\.data,\s*duration\)/);
-  assert.match(store, /backupStatus/);
-  assert.match(store, /updatedAt/);
+test('recordings are saved in pieces and checkpointed while recording', async () => {
+  const recorder = await read('src/lib/recorder.ts');
+  assert.match(recorder, /MIN_PIECE/);
+  assert.match(recorder, /MAX_PIECE/);
+  assert.match(recorder, /partial:/);
+  assert.match(recorder, /recoverInterruptedRecordings/);
 });
 
-test('long local transcriptions are resumable and use server-safe parallel parts', async () => {
-  const app = await read('src/main.tsx');
-  assert.match(app, /TRANSCRIPTION_PART_SECONDS = 110/);
-  assert.match(app, /BACKGROUND_TRANSCRIPTION_PART_SECONDS = 600/);
-  assert.match(app, /TRANSCRIPTION_CONCURRENCY = 3/);
-  assert.match(app, /awaiting_sign_in/);
-  assert.match(app, /you may close the app while transcription continues/i);
-  assert.match(app, /autoBackgroundQueueAttempted/);
-  assert.match(app, /saveTranscriptionCheckpoint\(m\.id/);
-  assert.match(app, /loadTranscriptionCheckpoint\(m\.id\)/);
-  assert.match(app, /completedByIndex\.has\(index\)/);
-  assert.match(app, /Resume transcription/);
-  assert.match(app, /completed parts are saved automatically/);
+test('transcription retries with back-off and survives going offline', async () => {
+  const transcriber = await read('src/lib/transcriber.ts');
+  assert.match(transcriber, /MAX_ATTEMPTS/);
+  assert.match(transcriber, /notBefore/);
+  assert.match(transcriber, /navigator\.onLine/);
 });
