@@ -1,9 +1,11 @@
 import { json, options } from './_lib/http.js';
+import { vexaConfigured, vexaCreate, vexaStatus, vexaStop, vexaAudio } from './_lib/vexa.js';
 
 // On-demand meeting notetaker via Recall.ai. A bot only joins when the app
 // explicitly calls action "create" — there is no calendar auto-join.
 //
-// Env: RECALL_API_KEY (required), RECALL_REGION (optional; auto-detected).
+// Providers: VEXA_API_KEY (preferred; Google sign-in) or RECALL_API_KEY.
+// RECALL_REGION is optional and auto-detected.
 const REGIONS = ['us-west-2', 'us-east-1', 'eu-central-1', 'ap-northeast-1'];
 let detected = { region: process.env.RECALL_REGION || '', auth: '' };
 
@@ -11,7 +13,7 @@ const ALLOWED_HOSTS = [/(^|\.)teams\.microsoft\.com$/, /(^|\.)teams\.live\.com$/
 
 async function recall(path, init = {}) {
   const key = process.env.RECALL_API_KEY;
-  if (!key) throw Object.assign(new Error('The meeting bot is not set up yet. Add RECALL_API_KEY in Vercel → Settings → Environment Variables, then redeploy.'), { status: 503 });
+  if (!key) throw Object.assign(new Error('The notetaker is not set up yet. Add VEXA_API_KEY in Vercel → Settings → Environment Variables, then redeploy.'), { status: 503 });
   const regions = detected.region ? [detected.region, ...REGIONS.filter(r => r !== detected.region)] : REGIONS;
   const auths = detected.auth ? [detected.auth] : [`Token ${key}`, key];
   let last;
@@ -88,10 +90,19 @@ async function status(id) {
 
 export async function GET(request) {
   const url = new URL(request.url);
-  if (url.searchParams.get('check') === '1') return json(request, { configured: !!process.env.RECALL_API_KEY });
+  if (url.searchParams.get('check') === '1')
+    return json(request, { configured: vexaConfigured() || !!process.env.RECALL_API_KEY, provider: vexaConfigured() ? 'vexa' : process.env.RECALL_API_KEY ? 'recall' : null });
   const id = url.searchParams.get('id');
   if (!id) return json(request, { error: 'Missing bot id.' }, 400);
   try {
+    if (vexaConfigured() && id.includes('/')) {
+      const audio = url.searchParams.get('audio');
+      if (audio) {
+        const res = await vexaAudio(audio);
+        return new Response(res.body, { headers: { 'content-type': res.headers.get('content-type') || 'audio/webm', 'cache-control': 'no-store' } });
+      }
+      return json(request, await vexaStatus(id));
+    }
     return json(request, await status(id));
   } catch (e) {
     return json(request, { error: e.message }, e.status || 500);
@@ -101,6 +112,8 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const { action, id, meetingUrl, joinAt, botName } = await request.json();
+    if (action === 'create' && vexaConfigured()) return json(request, await vexaCreate({ meetingUrl, joinAt, botName }));
+    if ((action === 'leave' || action === 'cancel') && vexaConfigured() && String(id || '').includes('/')) return json(request, await vexaStop(id));
     if (action === 'create') {
       let parsed;
       try { parsed = new URL(String(meetingUrl || '').trim()); } catch { return json(request, { error: 'That doesn’t look like a meeting link.' }, 400); }

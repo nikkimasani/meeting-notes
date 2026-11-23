@@ -8,7 +8,7 @@ import { POST as chatPost } from './chat.js';
 //                             with speaker labels, and summarizes it (≈ $0.002).
 export async function GET(request) {
   const key = process.env.OPENAI_API_KEY;
-  const out = { ok: !!key, configured: !!key, notesModel: NOTES_MODEL, checks: {} };
+  const out = { ok: !!key, configured: !!key, notesModel: NOTES_MODEL, notetaker: process.env.VEXA_API_KEY ? 'vexa' : process.env.RECALL_API_KEY ? 'recall' : 'not set up', checks: {} };
   if (!key || new URL(request.url).searchParams.get('deep') !== '1') return json(request, out, key ? 200 : 503);
   const step = async (name, fn) => {
     const t = Date.now();
@@ -24,6 +24,14 @@ export async function GET(request) {
     const buf = await r.arrayBuffer();
     return { bytes: buf.byteLength, buf };
   });
+  if (process.env.VEXA_API_KEY) {
+    await step('vexa', async () => {
+      const r = await fetch((process.env.VEXA_API_BASE || 'https://api.cloud.vexa.ai') + '/bots/status', { headers: { 'X-API-Key': process.env.VEXA_API_KEY } });
+      if (!r.ok) throw new Error(`Vexa ${r.status}: ${(await r.text()).slice(0, 160)}`);
+      const d = await r.json();
+      return { running: (d.running_bots || []).length };
+    });
+  }
   let transcript = '';
   if (audio) {
     for (const model of ['gpt-4o-transcribe-diarize', 'gpt-4o-transcribe']) {
